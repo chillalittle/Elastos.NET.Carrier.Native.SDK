@@ -33,6 +33,11 @@ int ela_file_transfer_init(ElaCarrier *carrier,
     return -1;
 }
 
+void ela_file_transfer_cleanup(ElaCarrier *carrier)
+{
+    //TODO;
+}
+
 ElaFileTransfer *ela_file_transfer_open(ElaCarrier *carrier,
                            const char *address,
                            ElaFileTransferInfo *fileinfo_list,
@@ -40,6 +45,12 @@ ElaFileTransfer *ela_file_transfer_open(ElaCarrier *carrier,
 {
     //TODO;
     return NULL;
+}
+
+int ela_file_transfer_close(ElaFileTransfer *file_transfer)
+{
+    //TODO;
+    return -1;
 }
 
 char *ela_file_transfer_get_fileid(ElaFileTransfer *file_transfer,
@@ -101,14 +112,6 @@ int ela_file_transfer_pause(ElaFileTransfer *file_transfer,
 /* resume transfering */
 int ela_file_transfer_resume(ElaFileTransfer *file_transfer,
                            const char *fileid)
-{
-    //TODO;
-    return -1;
-}
-
-
-/* close file transfer instance */
-int ela_file_transfer_close(ElaFileTransfer *file_transfer)
 {
     //TODO;
     return -1;
