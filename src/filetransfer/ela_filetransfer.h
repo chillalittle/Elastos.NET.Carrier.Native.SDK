@@ -101,21 +101,136 @@ typedef struct ElaFileTransferInfo {
 
 /**
  * \~English
+ * Carrier filetransfer state.
+ * The filetransfer state will be changed according to the phase of filetransfer.
+ */
+typedef enum ElaFileTransferState {
+    /** The filetransfer handler is opened */
+    ElaFileTransferState_opened = 1,
+    /** The filetransfer instance is ready to pull file data or send file data. */
+    ElaFileTransferState_ready,
+    /** TODO */
+    ElaFileTransferState_connecting,
+    /** TODO */
+    ElaFileTransferState_connected,
+    /** TODO */
+    ElaFileTransferState_closed,
+    /** TODO */
+    ElaFileTransferState_failed
+} ElaFileTransferState;
+
+/**
+ * \~English
+ * Carrier filetransfer callacks.
+ */
+typedef struct ElaFileTransferCallbacks {
+    /**
+     * \~English
+     * An application-defined function that perform the state changed event.
+     *
+     * @param
+     *      filetransfer    [in] A handle to file transfer instance.
+     * @param
+     *      state           [in] The state of file transfer instance.
+     * @param
+     *      context         [in] The application defined context data.
+     *
+     */
+    void (*state_changed)(ElaFileTransfer *filetransfer,
+                          ElaFileTransferState state, void *context);
+
+    /**
+     * \~English
+     * An application-defined function that receive file transfer pull request
+     * event.
+     *
+     * @param
+     *      filetransfer    [in] A handle to the Carrier file transfer
+     *                           instance.
+     * @param
+     *      fileid          [in] The file identifier.
+     * @param
+     *      offset          [in] The start offset of data to transfer in file.
+     * @param
+     *      length          [in] The length of data to transfer for file.
+     * @param
+     *      context         [in] The application defined context data.
+     *
+     * @return
+     *      0 on success, or -1 if an error occurred. The specific error code
+     *      can be retrieved by calling ela_get_error().
+     */
+     void (*pull_request)(ElaFileTransfer *filetransfer, const char *fileid,
+                          uint64_t offset, size_t length, void *context);
+    /**
+     * \~English
+     * An application-defined function that perform receiving data.
+     *
+     * @param
+     *      filetransfer    [in] A handle to file transfer instance.
+     * @param
+     *      fileid          [in] The unique idenfier of transfering file.
+     * @param
+     *      offset          [in] The start offset of transfering file.
+     * @param
+     *      data            [in] The pointer to received data.
+     * @param
+     *      length          [in] The length of received data.
+     * @param
+     *      context         [in] The application defined context data.
+     */
+    void (*data)(ElaFileTransfer *filetransfer, const char *fileid,
+                 uint64_t offset, const uint8_t *data, size_t length,
+                 void *context);
+    /**
+     * \~English
+     * An application-defined function that perform paused control packet
+     * to pause file transfer.
+     *
+     * @param
+     *      file_transfer   [in] A handle to file transfer instance.
+     * @param
+     *      fileid          [in] The unique idenfier of transfering file.
+     * @param
+     *      context         [in] The application defined context data.
+     */
+    void (*pending)(ElaFileTransfer *file_transfer, const char *fileid,
+                   void *context);
+
+    /**
+     * \~English
+     * An application-defined function that perform resume control packet
+     * to resume file transfer.
+     *
+     * @param
+     *      file_transfer   [in] A handle to file transfer instance.
+     * @param
+     *      fileid          [in] The unique idenfier of transfering file.
+     * @param
+     *      context         [in] The application defined context data.
+     */
+    void (*resume)(ElaFileTransfer *file_transfer, const char *fileid,
+                    void *context);
+
+} ElaFileTransferCallbacks;
+
+/**
+ * \~English
  * An application-defined function that receive file transfer request
  * complete event.
  *
  * ElaSessionRequestCompleteCallback is the callback function type.
  *
  * @param
- *      carrier     [in] A handle to the Carrier node instance.
+ *      carrier         [in] A handle to the Carrier node instance.
  * @param
- *      address     [in] The target address.
+ *      address         [in] The target address.
  * @param
  *      fileinfo_list   [in] Array of file informatios.
  * @param
- *      count       [in] The count of file informations.
+ *      count           [in] The count of file informations.
  * @param
- *      context     [in] The application defined context data.
+ *      context         [in] The application defined context data.
  *
  * @return
  *      0 on success, or -1 if an error occurred. The specific error code
@@ -134,20 +249,20 @@ typedef void (*ElaFileTransferRequestCallback)(ElaCarrier *carrier,
  * calling any file transfer API.
  *
  * @param
- *      carrier     [in] A handle to the Carrier node instance.
+ *      carrier         [in] A handle to the Carrier node instance.
  * @param
- *      callback    [in] A pointer to file transfer request callback.
+ *      callback        [in] A pointer to file transfer request callback.
  * @param
- *      context     [in] The application defined context data.
+ *      context         [in] The application defined context data.
  *
  * @return
  *      0 on success, or -1 if an error occurred. The specific error code
  *      can be retrieved by calling ela_get_error().
  */
 CARRIER_API
-int ela_file_transfer_init(ElaCarrier *carrier,
-                           ElaFileTransferRequestCallback *callback,
-                           void *context);
+int ela_filetransfer_init(ElaCarrier *carrier,
+                          ElaFileTransferRequestCallback *callback,
+                          void *context);
 
 /**
  * \~English
@@ -157,12 +272,9 @@ int ela_file_transfer_init(ElaCarrier *carrier,
  * to clean up the resources associated with the extension.
  *
  * If the extension is not initialized, this function has no effect.
- *
- * @param
- *      carrier     [in] A handle to the carrier node instance.
  */
 CARRIER_API
-void ela_file_transfer_cleanup(ElaCarrier *carrier);
+void ela_filetransfer_cleanup(ElaCarrier *carrier);
 
 /**
  * \~English
@@ -176,35 +288,40 @@ void ela_file_transfer_cleanup(ElaCarrier *carrier);
  * should feed file information received from request callback.
  *
  * @param
- *      carrier     [in] A handle to the Carrier node instance.
+ *      carrier         [in] A handle to the Carrier node instance.
  * @param
- *      address     [in] The target address.
+ *      address         [in] The target address.
  * @param
  *      fileinfo_list   [in] Array of file informatios.
  * @param
- *      count       [in] The count of file informations.
+ *      count           [in] The count of file informations.
+ * @param
+ *      callbacks       [in] A pointer to ElaFileTransferCallbacks to handle
+ *                           all events related to new filetransfer instance.
+ * @param
+ *      context         [in] The application defined context data.
  *
  * @return
  *      0 on success, or -1 if an error occurred. The specific error code
  *      can be retrieved by calling ela_get_error().
  */
-ElaFileTransfer *ela_file_transfer_open(ElaCarrier *carrier,
-                           const char *address,
-                           ElaFileTransferInfo *fileinfo_list,
-                           size_t count);
+CARRIER_API
+ElaFileTransfer *ela_filetransfer_open(ElaCarrier *carrier,
+                                       const char *address,
+                                       ElaFileTransferInfo *fileinfo_list,
+                                       size_t count,
+                                       ElaFileTransferCallbacks *callbacks,
+                                       void *context);
 
 /**
  * \~English
  * Close file transfer instance.
  *
  * @param
- *      file_transfer   [in] A handle to the Carrier file transfer instance.
- *
- * @return
- *      0 on success, or -1 if an error occurred. The specific error code
- *      can be retrieved by calling ela_get_error().
+ *      filetransfer    [in] A handle to the Carrier file transfer instance.
  */
-int ela_file_transfer_close(ElaFileTransfer *file_transfer);
+CARRIER_API
+void ela_filetransfer_close(ElaFileTransfer *filetransfer);
 
 /**
  * \~English
@@ -213,93 +330,62 @@ int ela_file_transfer_close(ElaFileTransfer *file_transfer);
  * Each file has it's unique fileid used between two peers.
  *
  * @param
- *      file_transfer   [in] A handle to the Carrier file transfer instance.
+ *      filetransfer    [in] A handle to the Carrier file transfer instance.
  * @param
- *      filename    [in] The target file name.
+ *      filename        [in] The target file name.
  * @param
- *      fileid      [in] A buffer to receive file identifier.
+ *      fileid          [in] A buffer to receive file identifier.
  * @param
- *      length      [in] The length of buffer to receive file identifier.
+ *      length          [in] The length of buffer to receive file identifier.
  *
  * @return
  *      0 on success, or -1 if an error occurred. The specific error code
  *      can be retrieved by calling ela_get_error().
  */
-char *ela_file_transfer_get_fileid(ElaFileTransfer *file_transfer,
-                           const char *filename,
-                           char *fileid_buf,
-                           size_t length);
+CARRIER_API
+char *ela_file_transfer_get_fileid(ElaFileTransfer *filetransfer,
+                                   const char *filename,
+                                   char *fileid, size_t length);
 
 /**
  * \~English
- * Carrier file transfer request complete callbacks.
+ * Carrier file transfer request complete callbacks
+ *
+ * @param
+ *      filetransfer    [in] A handle to the Carrier file transfer instance.
+ * @param
+ *      status          [in] The status code of the response. 0 is success,
+ *                          otherwise is error.
+ * @param
+ *      reason          [in] The error message if status is error, or NULL
+ *                          if success.
+ * @param
+ *      context         [in] The application defined context data.
  */
-typedef struct ElaFileTransferRequestCompleteCallbacks {
-    /**
-     * \~English
-     * An application-defined function that receive file transfer response
-     * event.
-     *
-     * @param
-     *      file_transfer   [in] A handle to the Carrier file transfer
-     *                           instance.
-     * @param
-     *      status      [in] The status code of the response.
-     *                       0 is success, otherwise is error.
-     * @param
-     *      reason      [in] The error message if status is error, or NULL
-     *                       if success.
-     * @param
-     *      context     [in] The application defined context data.
-     */
-    void (*response)(ElaFileTransfer *file_transfer, int status,
-                     const char *reason, void *context);
 
-    /**
-     * \~English
-     * An application-defined function that receive file transfer pull request
-     * event.
-     *
-     * @param
-     *      file_transfer   [in] A handle to the Carrier file transfer
-     *                           instance.
-     * @param
-     *      fileid      [in] The file identifier.
-     * @param
-     *      offset      [in] The start offset of data to transfer in file.
-     * @param
-     *      length      [in] The length of data to transfer for file.
-     * @param
-     *      context     [in] The application defined context data.
-     *
-     * @return
-     *      0 on success, or -1 if an error occurred. The specific error code
-     *      can be retrieved by calling ela_get_error().
-     */
-     void (*pull_request)(ElaFileTransfer *file_transfer, const char *fileid,
-                          uint64_t offset, size_t length, void *context);
-
-}  ElaFileTransferRequestCompleteCallbacks;
+typedef void (*ElaFileTransferRequestCompleteCallback)(ElaFileTransfer *filetransfer,
+                  int status, const char *reason, void *context);
 
 /**
  * \~English
  * Send a file transfer request to target peer.
  *
  * @param
- *      file_transfer   [in] A handle to the Carrier file transfer instance.
+ *      filetransfer    [in] A handle to the Carrier file transfer instance.
  * @param
- *      callbacks   [in] A pointer to ElaFileTransferRequestCompleteCallbacks
- *                       function to receive the file transfer response.
+ *      callback        [in] A pointer to ElaFileTransferRequestCompleteCallback
+ *                           function to receive the file transfer response.
  * @param
- *      context     [in] The application defined context data.
+ *      context         [in] The application defined context data.
  *
  * @return
  *      0 on success, or -1 if an error occurred. The specific error code
  *      can be retrieved by calling ela_get_error().
  */
-int ela_file_transfer_request(ElaFileTransfer *file_transfer,
-                           ElaFileTransferRequestCompleteCallbacks *callbacks,
-                           void *context);
+CARRIER_API
+int ela_filetransfer_request(ElaFileTransfer *filetransfer,
+                             ElaFileTransferRequestCompleteCallback *callback,
+                             void *context);
 
 /**
  * \~English
@@ -307,164 +393,97 @@ int ela_file_transfer_request(ElaFileTransfer *file_transfer,
  * request.
  *
  * @param
- *      file_transfer   [in] A handle to the Carrier file transfer instance.
+ *      filetransfer    [in] A handle to the Carrier file transfer instance.
  * @param
- *      status      [in] The status code of the response.
- *                       0 is success, otherwise is error.
+ *      status          [in] The status code of the response. 0 is success,
+ *                           otherwise is error.
  * @param
- *      reason      [in] The error message if status is error, or NULL
- *                       if success.
+ *      reason          [in] The error message if status is error, or NULL
+ *                           if success.
  *
  * @return
  *      0 on success, or -1 if an error occurred. The specific error code
  *      can be retrieved by calling ela_get_error().
  */
-int ela_file_transfer_response(ElaFileTransfer *file_transfer,
-                               int status,
-                               const char *reason);
-
-/**
- * \~English
- * Carrier file transfer pull callacks.
- */
-typedef struct ElaFileTransferPullCallbacks {
-    /**
-     * \~English
-     * An application-defined function that perform receiving data.
-     *
-     * @param
-     *      file_transfer   [in] A handle to file transfer instance.
-     * @param
-     *      fileid          [in] The unique idenfier of transfering file.
-     * @param
-     *      offset          [in] The start offset of transfering file.
-     * @param
-     *      data            [in] The pointer to received data.
-     * @param
-     *      length          [in] The length of received data.
-     * @param
-     *      context     [in] The application defined context data.
-     */
-    void (*data)(ElaFileTransfer *file_transfer, const char *fileid,
-                 uint64_t offset, const uint8_t *data, size_t length,
-                 void *context);
-    /**
-     * \~English
-     * An application-defined function that perform paused control packet
-     * to pause file transfer.
-     *
-     * @param
-     *      file_transfer   [in] A handle to file transfer instance.
-     * @param
-     *      fileid          [in] The unique idenfier of transfering file.
-     * @param
-     *      context         [in] The application defined context data.
-     */
-    void (*paused)(ElaFileTransfer *file_transfer, const char *fileid,
-                   void *context);
-
-    /**
-     * \~English
-     * An application-defined function that perform resume control packet
-     * to resume file transfer.
-     *
-     * @param
-     *      file_transfer   [in] A handle to file transfer instance.
-     * @param
-     *      fileid          [in] The unique idenfier of transfering file.
-     * @param
-     *      context         [in] The application defined context data.
-     */
-    void (*resumed)(ElaFileTransfer *file_transfer, const char *fileid,
-                    void *context);
-
-} ElaFileTransferPullCallbacks;
+CARRIER_API
+int ela_filetransfer_response(ElaFileTransfer *filetransfer, int status,
+                              const char *reason);
 
 /**
  * \~English
  * To send pull request to transfer file with specified file.
  *
  * @param
- *      file_transfer   [in] A handle to the Carrier file transfer instance.
+ *      filetransfer    [in] A handle to the Carrier file transfer instance.
  * @param
- *      fileid      [in] The file identifier.
+ *      fileid          [in] The file identifier.
  * @param
- *      offset      [in] The start offset of data to transfer in file.
+ *      offset          [in] The start offset of data to transfer in file.
  * @param
- *      length      [in] The length of data to transfer for file.
- * @param
- *      callbacks   [in] A pointer to ElaFileTransferPullCallbacks
- *                       function to receive the file transfer data.
- * @param
- *      context     [in] The application defined context data.
+ *      length          [in] The length of data to transfer for file.
  *
  * @return
  *      0 on success, or -1 if an error occurred. The specific error code
  *      can be retrieved by calling ela_get_error().
  */
-int ela_file_transfer_pull(ElaFileTransfer *file_transfer,
-                           const char *fileid,
-                           uint64_t offset,
-                           size_t length,
-                           ElaFileTransferPullCallbacks *callbacks,
-                           void *context);
+CARRIER_API
+int ela_filetransfer_pull(ElaFileTransfer *filetransfer, const char *fileid,
+                          uint64_t offset, size_t length);
 
 /**
  * \~English
  * To transfer file data with specified file.
  *
  * @param
- *      file_transfer   [in] A handle to the Carrier file transfer instance.
+ *      filetransfer    [in] A handle to the Carrier file transfer instance.
  * @param
- *      fileid      [in] The file identifier.
+ *      fileid          [in] The file identifier.
  * @param
- *      offset      [in] The start offset of data to transfer in file.
+ *      offset          [in] The start offset of data to transfer in file.
  * @param
- *      data        [in] The data to transfer for file.
+ *      data            [in] The data to transfer for file.
  * @param
- *      length      [in] The length of data to transfer for file.
+ *      length          [in] The length of data to transfer for file.
  *
  * @return
  *      0 on success, or -1 if an error occurred. The specific error code
  *      can be retrieved by calling ela_get_error().
  */
-int ela_file_transfer_send(ElaFileTransfer  *file_transfer,
-                           const char *fileid,
-                           uint64_t offset,
-                           const uint8_t *data,
-                           size_t length);
+CARRIER_API
+int ela_filetransfer_send(ElaFileTransfer  *filetransfer, const char *fileid,
+                          uint64_t offset, const uint8_t *data, size_t length);
 
 /**
  * \~English
  * Pause transfering file data with specified file.
  *
  * @param
- *      file_transfer   [in] A handle to the Carrier file transfer instance.
+ *      filetransfer    [in] A handle to the Carrier file transfer instance.
  * @param
- *      fileid      [in] The file identifier.
+ *      fileid          [in] The file identifier.
  *
  * @return
  *      0 on success, or -1 if an error occurred. The specific error code
  *      can be retrieved by calling ela_get_error().
  */
-int ela_file_transfer_pause(ElaFileTransfer *file_transfer,
-                            const char *fileid);
+CARRIER_API
+int ela_filetransfer_pause(ElaFileTransfer *filetransfer, const char *fileid);
 
 /**
  * \~English
  * Resume transfering file data with specified file.
  *
  * @param
- *      file_transfer   [in] A handle to the Carrier file transfer instance.
+ *      filetransfer    [in] A handle to the Carrier file transfer instance.
  * @param
- *      fileid      [in] The file identifier.
+ *      fileid          [in] The file identifier.
  *
  * @return
  *      0 on success, or -1 if an error occurred. The specific error code
  *      can be retrieved by calling ela_get_error().
  */
-int ela_file_transfer_resume(ElaFileTransfer *file_transfer,
-                             const char *fileid);
+CARRIER_API
+int ela_filetransfer_resume(ElaFileTransfer *filetransfer, const char *fileid);
 
 #ifdef __cplusplus
 }

@@ -64,6 +64,7 @@ endif()
 include_directories(
     .
     ../carrier
+    ../session
     ${CMAKE_CURRENT_BINARY_DIR}
     ${CARRIER_INT_DIST_DIR}/include)
 
