@@ -1576,6 +1576,9 @@ void handle_friend_message(ElaCarrier *w, uint32_t friend_number, ElaCP *cp)
     }
 }
 
+char *g_invite_req_buf = NULL;
+size_t g_invite_req_buf_len = 0;
+
 static
 void handle_invite_request(ElaCarrier *w, uint32_t friend_number, ElaCP *cp)
 {
@@ -1585,6 +1588,8 @@ void handle_invite_request(ElaCarrier *w, uint32_t friend_number, ElaCP *cp)
     const void *data;
     size_t len;
     int64_t tid;
+    size_t count;
+    bool to_process = false;
     char from[ELA_MAX_ID_LEN + ELA_MAX_EXTENSION_NAME_LEN + 4];
 
     assert(w);
@@ -1606,25 +1611,67 @@ void handle_invite_request(ElaCarrier *w, uint32_t friend_number, ElaCP *cp)
     data = elacp_get_raw_data(cp);
     len  = elacp_get_raw_data_length(cp);
     tid  = elacp_get_tid(cp);
+    count= elacp_get_count(cp);
 
+    if (count == 0) {
+        vlogE("Carrier: count should be greater than zero.");
+        return;
+    }
+
+    if (g_invite_req_buf == NULL) {
+        g_invite_req_buf = calloc(1, count);
+        if (g_invite_req_buf == NULL) {
+            goto record;
+        }
+
+        memcpy(g_invite_req_buf, data, len);
+        g_invite_req_buf_len = count;
+
+        if (count == len) {
+            to_process = true;
+            goto record;
+        }
+    } else {
+        // TODO: need to free first?
+        memcpy(g_invite_req_buf + count, data, len);
+        if (count + len == g_invite_req_buf_len) {
+            goto process;
+        }
+    }
+
+record:
     strcpy(from, friendid);
     if (name) {
         strcat(from, ":");
         strcat(from, name);
     }
+    // TODO: only if count if large than zero.
     tansaction_history_put_invite(w->thistory, from, tid);
+    if (!to_process) {
+        return;
+    }
 
+process:
     if (name) {
         if (strcmp(name, "session") == 0) {
             SessionExtension *ext = (SessionExtension *)w->session;
-            if (ext && ext->friend_invite_cb)
-                ext->friend_invite_cb(w, friendid, data, len, ext);
+            if (ext && ext->friend_invite_cb) {
+                ext->friend_invite_cb(w, friendid, g_invite_req_buf, g_invite_req_buf_len, ext);
+            }
         }
     } else {
-        if (w->callbacks.friend_invite)
-            w->callbacks.friend_invite(w, friendid, data, len, w->context);
+        if (w->callbacks.friend_invite) {
+            w->callbacks.friend_invite(w, friendid, g_invite_req_buf, g_invite_req_buf_len, w->context);
+        }
     }
+
+    free(g_invite_req_buf);
+    g_invite_req_buf = NULL;
+    g_invite_req_buf_len = 0;
 }
+
+char *g_invite_rsp_buf = NULL;
+size_t g_invite_rsp_buf_len = 0;
 
 static
 void handle_invite_response(ElaCarrier *w, uint32_t friend_number, ElaCP *cp)
@@ -1635,6 +1682,8 @@ void handle_invite_response(ElaCarrier *w, uint32_t friend_number, ElaCP *cp)
     ElaFriendInviteResponseCallback *callback_func;
     void *callback_ctxt;
     int64_t tid;
+    size_t count;
+    bool to_process = false;
     int status;
     const char *reason = NULL;
     const void *data = NULL;
@@ -1662,6 +1711,40 @@ void handle_invite_response(ElaCarrier *w, uint32_t friend_number, ElaCP *cp)
         return;
     }
 
+    data = elacp_get_raw_data(cp);
+    data_len = elacp_get_raw_data_length(cp);
+    count= elacp_get_count(cp);
+    if (count > 0) {
+        if (g_invite_rsp_buf == NULL) {
+            g_invite_rsp_buf = calloc(1, count);
+            if (g_invite_rsp_buf == NULL) {
+                // TODO: need to delete from hashtable?
+                return;
+            }
+            if (data && data_len > 0) {
+                memcpy(g_invite_rsp_buf, data, data_len);
+            }
+
+            g_invite_rsp_buf_len = count;
+
+            if (count != data_len) {
+                return;
+            }
+        } else {
+            if (data && data_len > 0) {
+                memcpy(g_invite_rsp_buf + count, data, data_len);
+            }
+            if (count + data_len != g_invite_rsp_buf_len) {
+                return;
+            }
+        }
+    }
+
+    status = elacp_get_status(cp);
+    if (status) {
+        reason = elacp_get_reason(cp);
+    }
+
     callback_func = (ElaFriendInviteResponseCallback *)tcb->callback_func;
     callback_ctxt = tcb->callback_context;
     assert(callback_func);
@@ -1669,15 +1752,10 @@ void handle_invite_response(ElaCarrier *w, uint32_t friend_number, ElaCP *cp)
     deref(tcb);
     transacted_callbacks_remove(w->tcallbacks, tid);
 
-    status = elacp_get_status(cp);
-    if (status) {
-        reason = elacp_get_reason(cp);
-    } else {
-        data = elacp_get_raw_data(cp);
-        data_len = elacp_get_raw_data_length(cp);
-    }
-
-    callback_func(w, friendid, status, reason, data, data_len, callback_ctxt);
+    callback_func(w, friendid, status, reason, g_invite_rsp_buf, g_invite_rsp_buf_len, callback_ctxt);
+    free(g_invite_rsp_buf);
+    g_invite_rsp_buf = NULL;
+    g_invite_rsp_buf_len = 0;
 }
 
 static
@@ -2450,10 +2528,11 @@ int ela_invite_friend(ElaCarrier *w, const char *to,
     int rc;
     TransactedCallback *tcb;
     int64_t tid;
-    uint8_t *_data;
-    size_t _data_len;
+    uint8_t seq = 0;
+    size_t count = len;
+    uint16_t send_len = (len > ELA_MAX_INVITE_UNIT_LEN) ? ELA_MAX_INVITE_UNIT_LEN : len;
 
-    if (!w || !to || !data || !len || !callback) {
+    if (!w || !to || !data || !len || len > ELA_MAX_INVITE_DATA_LEN || !callback) {
         ela_set_error(ELA_GENERAL_ERROR(ELAERR_INVALID_ARGS));
         return -1;
     }
@@ -2488,46 +2567,59 @@ int ela_invite_friend(ElaCarrier *w, const char *to,
         return -1;
     }
 
-    cp = elacp_create(ELACP_TYPE_INVITE_REQUEST, ext_name);
-    if (!cp) {
-        ela_set_error(ELA_GENERAL_ERROR(ELAERR_OUT_OF_MEMORY));
-        return -1;
-    }
-
     tid = generate_tid();
 
-    elacp_set_tid(cp, &tid);
-    elacp_set_raw_data(cp, data, len);
+    do {
+        uint8_t *_data;
+        size_t _data_len;
 
-    _data = elacp_encode(cp, &_data_len);
-    elacp_free(cp);
+        cp = elacp_create(ELACP_TYPE_INVITE_REQUEST, ext_name);
+        if (!cp) {
+            ela_set_error(ELA_GENERAL_ERROR(ELAERR_OUT_OF_MEMORY));
+            return -1;
+        }
 
-    if (!_data) {
-        ela_set_error(ELA_GENERAL_ERROR(ELAERR_OUT_OF_MEMORY));
-        return -1;
-    }
+        elacp_set_tid(cp, &tid);
+        ++seq;
+        if (seq == 1) {
+            elacp_set_count(cp, count);
+        } else {
+            elacp_set_count(cp, (seq - 1) * ELA_MAX_INVITE_UNIT_LEN);
+        }
+        elacp_set_raw_data(cp, data, send_len);
+        data += send_len;
+        len -= send_len;
+        send_len = (len > ELA_MAX_INVITE_UNIT_LEN) ? ELA_MAX_INVITE_UNIT_LEN : len;
+        _data = elacp_encode(cp, &_data_len);
+        elacp_free(cp);
 
-    tcb = (TransactedCallback*)rc_alloc(sizeof(TransactedCallback), NULL);
-    if (!tcb) {
-        ela_set_error(ELA_GENERAL_ERROR(ELAERR_OUT_OF_MEMORY));
+        if (!_data) {
+            ela_set_error(ELA_GENERAL_ERROR(ELAERR_OUT_OF_MEMORY));
+            return -1;
+        }
+
+        tcb = (TransactedCallback *)rc_alloc(sizeof(TransactedCallback), NULL);
+        if (!tcb) {
+            ela_set_error(ELA_GENERAL_ERROR(ELAERR_OUT_OF_MEMORY));
+            free(_data);
+            return -1;
+        }
+
+        tcb->tid = tid;
+        tcb->callback_func = callback;
+        tcb->callback_context = context;
+
+        transacted_callbacks_put(w->tcallbacks, tcb);
+        deref(tcb);
+
+        rc = dht_friend_message(&w->dht, friend_number, _data, _data_len);
         free(_data);
-        return -1;
-    }
 
-    tcb->tid = tid;
-    tcb->callback_func = callback;
-    tcb->callback_context = context;
-
-    transacted_callbacks_put(w->tcallbacks, tcb);
-    deref(tcb);
-
-    rc = dht_friend_message(&w->dht, friend_number, _data, _data_len);
-    free(_data);
-
-    if (rc < 0) {
-        ela_set_error(rc);
-        return -1;
-    }
+        if (rc < 0) {
+            ela_set_error(rc);
+            return -1;
+        }
+    } while (len > 0);
 
     return 0;
 }
@@ -2539,13 +2631,14 @@ int ela_reply_friend_invite(ElaCarrier *w, const char *to,
     char *addr, *userid, *ext_name;
     uint32_t friend_number;
     int64_t tid;
+    uint8_t seq = 0;
+    size_t count = len;
+    uint16_t send_len = (len > ELA_MAX_INVITE_UNIT_LEN) ? ELA_MAX_INVITE_UNIT_LEN : len;
     ElaCP *cp;
     int rc;
-    uint8_t *_data;
-    size_t _data_len;
 
     if (!w || !to || !*to || (status != 0 && !reason)
-            || (data && !len)) {
+            || (data && (!len || len > ELA_MAX_INVITE_DATA_LEN))) {
         ela_set_error(ELA_GENERAL_ERROR(ELAERR_INVALID_ARGS));
         return -1;
     }
@@ -2586,34 +2679,49 @@ int ela_reply_friend_invite(ElaCarrier *w, const char *to,
         return -1;
     }
 
-    cp = elacp_create(ELACP_TYPE_INVITE_RESPONSE, ext_name);
-    if (!cp) {
-        ela_set_error(ELA_GENERAL_ERROR(ELAERR_OUT_OF_MEMORY));
-        return -1;
-    }
+    do {
+        uint8_t *_data;
+        size_t _data_len;
 
-    elacp_set_tid(cp, &tid);
-    elacp_set_status(cp, status);
-    if (status)
-        elacp_set_reason(cp, reason);
-    if (data)
-        elacp_set_raw_data(cp, data, len);
+        cp = elacp_create(ELACP_TYPE_INVITE_RESPONSE, ext_name);
+        if (!cp) {
+            ela_set_error(ELA_GENERAL_ERROR(ELAERR_OUT_OF_MEMORY));
+            return -1;
+        }
 
-    _data = elacp_encode(cp, &_data_len);
-    elacp_free(cp);
+        elacp_set_tid(cp, &tid);
+        elacp_set_status(cp, status);
+        if (status)
+            elacp_set_reason(cp, reason);
+        if (data) {
+            ++seq;
+            if (seq == 1) {
+                elacp_set_count(cp, count);
+            } else {
+                elacp_set_count(cp, (seq - 1) * ELA_MAX_INVITE_UNIT_LEN);
+            }
+            elacp_set_raw_data(cp, data, send_len);
+            data += send_len;
+            len -= send_len;
+            send_len = (len > ELA_MAX_INVITE_UNIT_LEN) ? ELA_MAX_INVITE_UNIT_LEN : len;
+        }
 
-    if (!_data) {
-        ela_set_error(ELA_GENERAL_ERROR(ELAERR_OUT_OF_MEMORY));
-        return -1;
-    }
+        _data = elacp_encode(cp, &_data_len);
+        elacp_free(cp);
 
-    rc = dht_friend_message(&w->dht, friend_number, _data, _data_len);
-    free(_data);
+        if (!_data) {
+            ela_set_error(ELA_GENERAL_ERROR(ELAERR_OUT_OF_MEMORY));
+            return -1;
+        }
 
-    if (rc < 0) {
-        ela_set_error(rc);
-        return -1;
-    }
+        rc = dht_friend_message(&w->dht, friend_number, _data, _data_len);
+        free(_data);
+
+        if (rc < 0) {
+            ela_set_error(rc);
+            return -1;
+        }
+    } while (len > 0);
 
     transaction_history_remove_invite(w->thistory, to);
 

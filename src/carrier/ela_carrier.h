@@ -128,6 +128,18 @@ extern "C" {
  */
 #define ELA_MAX_ERROR_DESCRIPTION_LEN   256
 
+/**
+ * \~English
+ * Carrier invite request/response max transmission unit length.
+ */
+#define ELA_MAX_INVITE_UNIT_LEN         1280
+
+/**
+ * \~English
+ * Carrier invite request/response max transmission length.
+ */
+#define ELA_MAX_INVITE_DATA_LEN         8192
+
 typedef struct ElaCarrier ElaCarrier;
 
 /******************************************************************************

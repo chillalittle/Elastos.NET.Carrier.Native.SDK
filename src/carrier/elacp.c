@@ -67,6 +67,7 @@ struct ElaCPFriendMsg {
 struct ElaCPInviteReq {
     ElaCP header;
     int64_t tid;
+    size_t count;
     size_t len;
     const uint8_t *data;
 };
@@ -74,6 +75,7 @@ struct ElaCPInviteReq {
 struct ElaCPInviteRsp {
     ElaCP header;
     int64_t tid;
+    size_t count;
     int status;
     const char *reason;
     size_t len;
@@ -360,6 +362,29 @@ int64_t elacp_get_tid(ElaCP *cp)
     return tid;
 }
 
+size_t elacp_get_count(ElaCP *cp)
+{
+    struct elacp_packet_t pkt;
+    size_t count = 0;
+
+    assert(cp);
+    pkt.u.cp = cp;
+
+    switch(cp->type) {
+    case ELACP_TYPE_INVITE_REQUEST:
+        count = pktireq->count;
+        break;
+    case ELACP_TYPE_INVITE_RESPONSE:
+        count = pktirsp->count;
+        break;
+    default:
+        assert(0);
+        break;
+    }
+
+    return count;
+}
+
 int elacp_get_status(ElaCP *cp)
 {
     struct elacp_packet_t pkt;
@@ -630,6 +655,28 @@ void elacp_set_tid(ElaCP *cp, int64_t *tid)
     }
 }
 
+void elacp_set_count(ElaCP *cp, size_t count)
+{
+    struct elacp_packet_t pkt;
+
+    assert(cp);
+    assert(count);
+
+    pkt.u.cp = cp;
+
+    switch(cp->type) {
+    case ELACP_TYPE_INVITE_REQUEST:
+        pktireq->count = count;
+        break;
+    case ELACP_TYPE_INVITE_RESPONSE:
+        pktirsp->count = count;
+        break;
+    default:
+        assert(0);
+        break;
+    }
+}
+
 void elacp_set_status(ElaCP *cp, int status)
 {
     struct elacp_packet_t pkt;
@@ -763,6 +810,7 @@ uint8_t *elacp_encode(ElaCP *cp, size_t *encoded_len)
             elacp_friendmsg_ext_add(&builder, str);
         }
         elacp_invitereq_tid_add(&builder, pktireq->tid);
+        elacp_invitereq_count_add(&builder, pktireq->count);
         vec = flatbuffers_uint8_vec_create(&builder, pktireq->data, pktireq->len);
         elacp_invitereq_data_add(&builder, vec);
         ref = elacp_invitereq_end(&builder);
@@ -775,6 +823,7 @@ uint8_t *elacp_encode(ElaCP *cp, size_t *encoded_len)
             elacp_friendmsg_ext_add(&builder, str);
         }
         elacp_invitersp_tid_add(&builder, pktirsp->tid);
+        elacp_invitersp_count_add(&builder, pktirsp->count);
         elacp_invitersp_status_add(&builder, pktirsp->status);
         if (pktirsp->status) {
             str = flatcc_builder_create_string_str(&builder, pktirsp->reason);
@@ -903,6 +952,7 @@ ElaCP *elacp_decode(const uint8_t *data, size_t len)
     case ELACP_TYPE_INVITE_REQUEST:
         tblireq = elacp_packet_body(packet);
         pktireq->tid = elacp_invitereq_tid(tblireq);
+        pktireq->count = elacp_invitereq_count(tblireq);
         pktireq->data = vec = elacp_invitereq_data(tblireq);
         pktireq->len = flatbuffers_uint8_vec_len(vec);
         if (elacp_invitereq_ext_is_present(tblireq))
@@ -912,6 +962,7 @@ ElaCP *elacp_decode(const uint8_t *data, size_t len)
     case ELACP_TYPE_INVITE_RESPONSE:
         tblirsp = elacp_packet_body(packet);
         pktirsp->tid = elacp_invitersp_tid(tblirsp);
+        pktireq->count = elacp_invitersp_count(tblirsp);
         pktirsp->status = elacp_invitersp_status(tblirsp);
         if (pktirsp->status)
             pktirsp->reason = elacp_invitersp_reason(tblirsp);

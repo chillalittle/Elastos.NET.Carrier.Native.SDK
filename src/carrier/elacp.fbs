@@ -46,12 +46,14 @@ table friendmsg {
 table invitereq {
     ext    : string;
     tid    : long;
+    count  : int;
     data   : [uint8];
 }
 
 table invitersp {
     ext    : string;
     tid    : long;
+    count  : int;
     status : int;
     reason : string;
     data   : [uint8];
