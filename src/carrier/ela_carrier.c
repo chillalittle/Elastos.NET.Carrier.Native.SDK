@@ -2526,7 +2526,6 @@ int ela_invite_friend(ElaCarrier *w, const char *to,
     uint32_t friend_number;
     ElaCP *cp;
     int rc;
-    TransactedCallback *tcb;
     int64_t tid;
     uint8_t seq = 0;
     size_t count = len;
@@ -2598,19 +2597,22 @@ int ela_invite_friend(ElaCarrier *w, const char *to,
             return -1;
         }
 
-        tcb = (TransactedCallback *)rc_alloc(sizeof(TransactedCallback), NULL);
-        if (!tcb) {
-            ela_set_error(ELA_GENERAL_ERROR(ELAERR_OUT_OF_MEMORY));
-            free(_data);
-            return -1;
+        if (seq == 1) {
+            TransactedCallback *tcb;
+            tcb = (TransactedCallback *)rc_alloc(sizeof(TransactedCallback), NULL);
+            if (!tcb) {
+                ela_set_error(ELA_GENERAL_ERROR(ELAERR_OUT_OF_MEMORY));
+                free(_data);
+                return -1;
+            }
+
+            tcb->tid = tid;
+            tcb->callback_func = callback;
+            tcb->callback_context = context;
+
+            transacted_callbacks_put(w->tcallbacks, tcb);
+            deref(tcb);
         }
-
-        tcb->tid = tid;
-        tcb->callback_func = callback;
-        tcb->callback_context = context;
-
-        transacted_callbacks_put(w->tcallbacks, tcb);
-        deref(tcb);
 
         rc = dht_friend_message(&w->dht, friend_number, _data, _data_len);
         free(_data);
