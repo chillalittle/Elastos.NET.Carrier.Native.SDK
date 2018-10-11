@@ -122,6 +122,11 @@ extern "C" {
  */
 #define ELA_MAX_APP_MESSAGE_LEN         1024
 
+
+#define ELA_STATUS_TIMEOUT              1
+
+#define ELA_STATUS_USER                 100
+
 typedef struct ElaCarrier ElaCarrier;
 
 /******************************************************************************

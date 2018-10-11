@@ -28,7 +28,16 @@
 
 #include <linkedhashtable.h>
 
-#include "ela_carrier_impl.h"
+#define TRANSACTION_EXPIRE_INTERVAL     (10 * 60) // 10m
+
+typedef struct TransactedCallback {
+    hash_entry_t he;
+    int64_t tid;
+    uint32_t friend_number;
+    void *callback_func;
+    void *callback_context;
+    struct timeval expire_time;
+} TransactedCallback;
 
 static
 uint32_t cid_hash_code(const void *key, size_t keylen)
@@ -80,10 +89,18 @@ static inline
 void transacted_callbacks_put(hashtable_t *callbacks,
                               TransactedCallback *callback)
 {
+    struct timeval now, interval;
+
     assert(callbacks && callback);
     callback->he.data = callback;
     callback->he.key = &callback->tid;
     callback->he.keylen = sizeof(callback->tid);
+
+    gettimeofday(&now, NULL);
+    interval.tv_sec = TRANSACTION_EXPIRE_INTERVAL;
+    interval.tv_usec = 0;
+    timeradd(&now, &interval, &callback->expire_time);
+
     hashtable_put(callbacks, &callback->he);
 }
 
@@ -106,6 +123,36 @@ void transacted_callbacks_clear(hashtable_t *callbacks)
 {
     assert(callbacks);
     hashtable_clear(callbacks);
+}
+
+typedef void (*ElaTransactionExpireCallback)(TransactedCallback *callbacks,
+                                             void *context);
+
+static inline
+void transacted_callbacks_check_expire(hashtable_t *callbacks,
+                        ElaTransactionExpireCallback expire_cb, void *context)
+{
+    hashtable_iterator_t it;
+    struct timeval now;
+
+    gettimeofday(&now, NULL);
+
+    hashtable_iterate(callbacks, &it);
+    while(hashtable_iterator_has_next(&it)) {
+        TransactedCallback *tcb;
+        int rc;
+
+        rc = hashtable_iterator_next(&it, NULL, NULL, (void **)&tcb);
+        if (rc <= 0)
+            break;
+
+        if (timercmp(&now, &tcb->expire_time, >)) {
+            hashtable_iterator_remove(&it);
+            expire_cb(tcb, context);
+        }
+
+        deref(tcb);
+    }
 }
 
 #endif /* __TCALLBACKS_H__ */

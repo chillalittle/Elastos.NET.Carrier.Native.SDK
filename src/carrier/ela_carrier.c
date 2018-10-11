@@ -1543,6 +1543,30 @@ redo_events:
 }
 
 static
+void do_expire_transaced_callback(TransactedCallback *callback, void *context)
+{
+    ElaCarrier *w = (ElaCarrier *)context;
+    char friendid[ELA_MAX_ID_LEN + 1];
+    ElaFriendInviteResponseCallback *callback_func;
+    FriendInfo *fi;
+
+    fi = friends_get(w->friends, callback->friend_number);
+    if (!fi) {
+        vlogE("Carrier: Unknown friend number %u, friend message dropped.",
+              callback->friend_number);
+        return;
+    }
+
+    strcpy(friendid, fi->info.user_info.userid);
+
+    callback_func = (ElaFriendInviteResponseCallback *)callback->callback_func;
+    assert(callback_func);
+
+    callback_func(w, friendid, ELA_STATUS_TIMEOUT, "timeout", NULL, 0,
+                  callback->callback_context);
+}
+
+static
 void handle_friend_message(ElaCarrier *w, uint32_t friend_number, ElaCP *cp)
 {
     FriendInfo *fi;
@@ -1781,6 +1805,8 @@ int ela_run(ElaCarrier *w, int interval)
         timeradd(&expire, &tmp, &expire);
 
         do_friend_events(w);
+        transacted_callbacks_check_expire(w->tcallbacks,
+                                          do_expire_transaced_callback, w);
 
         if (idle_interval > 0)
             notify_idle(w);
@@ -2515,6 +2541,7 @@ int ela_invite_friend(ElaCarrier *w, const char *to,
     }
 
     tcb->tid = tid;
+    tcb->friend_number = friend_number;
     tcb->callback_func = callback;
     tcb->callback_context = context;
 
@@ -2525,6 +2552,7 @@ int ela_invite_friend(ElaCarrier *w, const char *to,
     free(_data);
 
     if (rc < 0) {
+        transacted_callbacks_remove(w->tcallbacks, tid);
         ela_set_error(rc);
         return -1;
     }
@@ -2546,6 +2574,11 @@ int ela_reply_friend_invite(ElaCarrier *w, const char *to,
 
     if (!w || !to || !*to || (status != 0 && !reason)
             || (data && !len)) {
+        ela_set_error(ELA_GENERAL_ERROR(ELAERR_INVALID_ARGS));
+        return -1;
+    }
+
+    if (status < ELA_STATUS_USER) {
         ela_set_error(ELA_GENERAL_ERROR(ELAERR_INVALID_ARGS));
         return -1;
     }
