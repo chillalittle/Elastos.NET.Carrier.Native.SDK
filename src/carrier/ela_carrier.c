@@ -2578,10 +2578,10 @@ int ela_reply_friend_invite(ElaCarrier *w, const char *to,
         return -1;
     }
 
-    if (status < ELA_STATUS_USER) {
+    /*if (status < ELA_STATUS_USER) {
         ela_set_error(ELA_GENERAL_ERROR(ELAERR_INVALID_ARGS));
         return -1;
-    }
+    }*/
 
     addr = alloca(strlen(to) + 1);
     strcpy(addr, to);
